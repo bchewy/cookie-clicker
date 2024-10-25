@@ -154,29 +154,23 @@ export default {
   bottom: 0;
   height: 100vh;
   width: 100vw;
-  z-index: 1000;
+  z-index: 1001;
   border-radius: 0;
+  padding-top: 60px;
 }
 
 .terminal-header {
-  position: fixed; /* Change from absolute to fixed when in fullscreen */
+  position: fixed;
   top: 15px;
   right: 15px;
   display: flex;
   align-items: center;
   gap: 10px;
-  z-index: 1001; /* Increase z-index to be above the terminal */
-  background-color: rgba(30, 30, 30, 0.8);
+  z-index: 1002;
+  background-color: rgba(30, 30, 30, 0.9);
   padding: 8px;
   border-radius: 8px;
-  backdrop-filter: blur(4px); /* Add subtle blur effect */
-}
-
-/* Add specific styles for non-expanded state */
-.terminal:not(.terminal-expanded) .terminal-header {
-  position: absolute;
-  top: 10px;
-  right: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 .cookie-counter {
@@ -187,48 +181,23 @@ export default {
   display: flex;
   align-items: center;
   gap: 5px;
-  min-width: 80px; /* Add minimum width to prevent jumping */
-  justify-content: center;
-}
-
-.expand-button, .exit-button {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
-  transition: all 0.2s ease;
-  width: 32px;
-  height: 32px;
 }
 
 .expand-button {
+  background: none;
+  border: none;
   color: #00ff00;
+  cursor: pointer;
+  padding: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   opacity: 0.7;
+  transition: opacity 0.2s ease;
 }
 
 .expand-button:hover {
   opacity: 1;
-  background-color: rgba(0, 255, 0, 0.1);
-}
-
-.exit-button {
-  color: #ff4444;
-  opacity: 0.7;
-  font-size: 18px;
-}
-
-.exit-button:hover {
-  opacity: 1;
-  background-color: rgba(255, 68, 68, 0.2);
-}
-
-/* Add padding to terminal in fullscreen to prevent content from going under header */
-.terminal-expanded {
-  padding-top: 60px;
 }
 
 .terminal-history {
@@ -271,23 +240,26 @@ input {
 }
 
 .exit-button {
-  background: none;
-  border: none;
+  background: rgba(255, 68, 68, 0.2);
+  border: 1px solid rgba(255, 68, 68, 0.3);
   color: #ff4444;
   cursor: pointer;
-  padding: 5px 8px;
+  padding: 6px 12px;
   font-size: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0.7;
-  transition: opacity 0.2s ease;
+  opacity: 0.9;
+  transition: all 0.2s ease;
   border-radius: 4px;
+  min-width: 32px;
+  min-height: 32px;
 }
 
 .exit-button:hover {
   opacity: 1;
-  background-color: rgba(255, 68, 68, 0.2);
+  background-color: rgba(255, 68, 68, 0.3);
+  transform: scale(1.05);
 }
 
 .command-line {

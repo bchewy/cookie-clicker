@@ -1,7 +1,7 @@
 <template>
   <div class="container">
-    <Login v-if="!username" :username="username" @login="handleLogin" />
-    <template v-else>
+    <!-- Main content -->
+    <div class="game-content" :class="{ 'blurred': !username }">
       <h1>Bash Cookie Clicker</h1>
       <GameIntro v-if="showIntro" @close="showIntro = false" />
       <CookieDisplay :cookies="cookies" :cookiesPerSecond="cookiesPerSecond" />
@@ -12,7 +12,43 @@
         :cookies="cookies"
       />
       <Leaderboard :leaderboard="leaderboard" :activePlayers="activePlayers" :currentUser="username" />
-    </template>
+    </div>
+
+    <!-- Login overlay -->
+    <div class="login-overlay" v-if="!username">
+      <div class="login-box">
+        <h2>🍪 Bash Cookie Clicker</h2>
+        <div class="login-form">
+          <input 
+            type="text" 
+            v-model="inputUsername" 
+            placeholder="Username (min. 3 characters)"
+            @keyup.enter="focusPassword" 
+            ref="usernameInput" 
+            :disabled="checking"
+          >
+
+          <input 
+            type="password" 
+            v-model="inputPassword" 
+            placeholder="Password (dont put a real one..)"
+            @keyup.enter="handleSubmit" 
+            ref="passwordInput" 
+            maxlength="20"
+          >
+
+          <div class="status" v-if="checking">Checking...</div>
+          <div class="error" v-if="error">{{ error }}</div>
+
+          <button 
+            @click="handleSubmit" 
+            :disabled="checking || !inputUsername.trim() || !isValidPassword"
+          >
+            Start Playing
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -20,7 +56,6 @@
 import Terminal from './components/Terminal.vue'
 import CookieDisplay from './components/CookieDisplay.vue'
 import Leaderboard from './components/Leaderboard.vue'
-import Login from './components/Login.vue'
 import GameIntro from './components/GameIntro.vue'
 import { createClient } from '@supabase/supabase-js'
 import { SUPABASE_CONFIG } from './config'
@@ -130,7 +165,6 @@ export default {
     Terminal,
     CookieDisplay,
     Leaderboard,
-    Login,
     GameIntro
   },
   data() {
@@ -153,6 +187,15 @@ export default {
       lastKnownCookies: 0,
       lastHiddenTime: null,
       isClosing: false,
+      inputUsername: '',
+      inputPassword: '',
+      checking: false,
+      error: null,
+    }
+  },
+  computed: {
+    isValidPassword() {
+      return this.inputPassword.length >= 4 && this.inputPassword.length <= 20;
     }
   },
   created() {
@@ -516,7 +559,16 @@ export default {
           break
 
         case 'buy':
-          this.handleBuy(args[1])
+          if (args.length < 2) {
+            this.commandHistory.push({
+              command,
+              output: 'Usage: buy <item-name> [amount|max]'
+            })
+            return
+          }
+          const item = args[1]
+          const amount = args[2]
+          this.handleBuy(item, amount)
           break
 
         case 'ls':
@@ -548,11 +600,11 @@ export default {
     },
 
     // Update handleBuy method to preserve user's upgrade data
-    async handleBuy(item) {
+    async handleBuy(item, amount = '1') {
       if (!item) {
         this.commandHistory.push({
           command: 'buy',
-          output: 'Usage: buy <item-name>'
+          output: 'Usage: buy <item-name> [amount|max]'
         })
         return
       }
@@ -560,60 +612,100 @@ export default {
       const upgrade = this.upgrades[item]
       if (!upgrade) {
         this.commandHistory.push({
-          command: 'buy ' + item,
+          command: `buy ${item}`,
           output: 'Item not found: ' + item
         })
         return
       }
 
-      const cost = this.calculateCost(item)
-      if (this.cookies >= cost) {
-        this.cookies -= cost
+      let quantityToBuy = 0
+      let totalCost = 0
 
-        // Update the upgrade count while preserving existing data
+      if (amount.toLowerCase() === 'max') {
+        // Calculate maximum affordable quantity
+        let cookies = this.cookies
+        let count = upgrade.count || 0
+        while (cookies >= this.calculateCost(item, count)) {
+          cookies -= this.calculateCost(item, count)
+          count++
+          quantityToBuy++
+        }
+      } else {
+        // Parse amount as number
+        quantityToBuy = parseInt(amount)
+        if (isNaN(quantityToBuy) || quantityToBuy < 1) {
+          quantityToBuy = 1
+        }
+
+        // Calculate total cost for the requested quantity
+        for (let i = 0; i < quantityToBuy; i++) {
+          totalCost += this.calculateCost(item, (upgrade.count || 0) + i)
+        }
+
+        // Check if user can afford the total cost
+        if (this.cookies < totalCost) {
+          this.commandHistory.push({
+            command: `buy ${item} ${amount}`,
+            output: `Not enough cookies! Need ${this.formatNumber(totalCost)} cookies.`
+          })
+          return
+        }
+      }
+
+      if (quantityToBuy === 0) {
+        this.commandHistory.push({
+          command: `buy ${item} ${amount}`,
+          output: `Cannot afford any ${upgrade.name}!`
+        })
+        return
+      }
+
+      // Calculate final cost for the actual quantity being bought
+      totalCost = 0
+      for (let i = 0; i < quantityToBuy; i++) {
+        totalCost += this.calculateCost(item, (upgrade.count || 0) + i)
+      }
+
+      // Process the purchase
+      try {
+        this.cookies -= totalCost
         this.upgrades[item] = {
-          ...this.upgrades[item],  // Preserve existing upgrade data
-          count: (this.upgrades[item].count || 0) + 1
+          ...this.upgrades[item],
+          count: (this.upgrades[item].count || 0) + quantityToBuy
         }
 
         this.recalculateCPS()
 
-        // Immediately sync with server after purchase
-        try {
-          const { error } = await this.supabase
-            .from('players')
-            .update({
-              cookies: this.cookies,
-              cookies_per_second: this.cookiesPerSecond,
-              upgrades: this.upgrades,
-              last_updated: new Date().toISOString()
-            })
-            .eq('username', this.username)
-
-          if (error) throw error
-
-          this.commandHistory.push({
-            command: 'buy ' + item,
-            output: `Bought ${upgrade.name}! You now have ${this.upgrades[item].count} of them.`
+        // Sync with server
+        const { error } = await this.supabase
+          .from('players')
+          .update({
+            cookies: this.cookies,
+            cookies_per_second: this.cookiesPerSecond,
+            upgrades: this.upgrades,
+            last_updated: new Date().toISOString()
           })
-        } catch (err) {
-          console.error('Error syncing purchase:', err)
-          this.commandHistory.push({
-            command: 'buy ' + item,
-            output: 'Error saving purchase. Please try again.'
-          })
-        }
-      } else {
+          .eq('username', this.username)
+
+        if (error) throw error
+
         this.commandHistory.push({
-          command: 'buy ' + item,
-          output: `Not enough cookies! Need ${cost.toFixed(1)} cookies.`
+          command: `buy ${item} ${amount}`,
+          output: `Bought ${quantityToBuy}x ${upgrade.name} for ${this.formatNumber(totalCost)} cookies! You now have ${this.upgrades[item].count} of them.`
+        })
+      } catch (err) {
+        console.error('Error syncing purchase:', err)
+        this.commandHistory.push({
+          command: `buy ${item} ${amount}`,
+          output: 'Error saving purchase. Please try again.'
         })
       }
     },
 
-    calculateCost(item) {
+    calculateCost(item, count = null) {
       const upgrade = this.upgrades[item]
-      return Math.floor(upgrade.baseCost * Math.pow(1.15, upgrade.count))
+      const currentCount = count !== null ? count : upgrade.count
+      return Math.floor(upgrade.baseCost * Math.pow(1.15, currentCount))
     },
 
     recalculateCPS() {
@@ -629,7 +721,10 @@ Available commands:
 - click-cookie (or click): Click the cookie manually
 - cookie-count (or stats): Show current cookies and stats
 - ls (or shop): Show available upgrades
-- buy <item>: Purchase an upgrade
+- buy <item> [amount|max]: Purchase upgrade(s). Examples:
+  • buy auto-clicker     (buy 1)
+  • buy grandma 5        (buy 5)
+  • buy factory max      (buy maximum affordable)
 - save: Save your progress
 - clear: Clear terminal
 - achievements: Show your achievements
@@ -829,6 +924,142 @@ Available commands:
       if (num >= 1e6) return `${(num / 1e6).toFixed(1)}M`
       if (num >= 1e3) return `${(num / 1e3).toFixed(1)}K`
       return num.toFixed(1)
+    },
+
+    focusPassword() {
+      this.$refs.passwordInput.focus()
+    },
+
+    async handleSubmit() {
+      if (!this.inputUsername.trim() || !this.isValidPassword) {
+        this.error = 'Please enter valid username and password'
+        return
+      }
+
+      if (this.inputUsername.length < 3) {
+        this.error = 'Username must be at least 3 characters'
+        return
+      }
+
+      this.checking = true
+      this.error = ''
+
+      try {
+        console.log('Attempting login for:', this.inputUsername.trim())
+
+        // First, check if user exists
+        const { data: existingPlayer, error: fetchError } = await this.supabase
+          .from('players')
+          .select('*')
+          .eq('username', this.inputUsername.trim())
+          .single()
+
+        console.log('Fetch result:', { existingPlayer, fetchError })
+
+        if (fetchError && fetchError.code !== 'PGRST116') {
+          console.error('Fetch error:', fetchError)
+          throw fetchError
+        }
+
+        let player
+        if (existingPlayer) {
+          // Login logic for existing player
+          if (existingPlayer.password !== this.inputPassword) {
+            throw new Error('Invalid password')
+          }
+
+          // Update player data
+          const now = new Date()
+          const lastActivity = new Date(existingPlayer.last_activity)
+          const timeDiff = (now - lastActivity) / 1000 / 60
+
+          const updates = {
+            last_updated: now.toISOString()
+          }
+
+          if (timeDiff > 5) {
+            updates.last_activity = now.toISOString()
+          }
+
+          const { data: updatedPlayer, error: updateError } = await this.supabase
+            .from('players')
+            .update(updates)
+            .eq('id', existingPlayer.id)
+            .select()
+            .single()
+
+          if (updateError) throw updateError
+          player = updatedPlayer
+        } else {
+          // Create new player
+          const now = new Date().toISOString()
+          const { data: newPlayer, error: insertError } = await this.supabase
+            .from('players')
+            .insert([{
+              username: this.inputUsername.trim(),
+              password: this.inputPassword,
+              cookies: 0,
+              cookies_per_second: 0,
+              last_updated: now,
+              last_activity: now,
+              upgrades: null
+            }])
+            .select()
+            .single()
+
+          if (insertError) {
+            if (insertError.code === '23505') {
+              throw new Error('Username already taken')
+            }
+            throw insertError
+          }
+          player = newPlayer
+        }
+
+        if (!player) {
+          throw new Error('Failed to get player data')
+        }
+
+        // Store credentials
+        localStorage.setItem('gameCredentials', JSON.stringify({
+          username: this.inputUsername.trim(),
+          password: this.inputPassword
+        }))
+
+        // Update app state
+        this.username = player.username
+        this.password = this.inputPassword
+        this.cookies = player.cookies || 0
+        this.cookiesPerSecond = player.cookies_per_second || 0
+
+        // Initialize game after successful login
+        this.initializeGame()
+        this.startAutoSync()
+        this.initializeRealtimeSubscription()
+
+      } catch (err) {
+        console.error('Login error:', err)
+        this.error = err.message || 'Error processing request'
+      } finally {
+        this.checking = false
+      }
+    }
+  },
+  mounted() {
+    this.$refs.usernameInput?.focus()
+
+    // Check for stored credentials
+    const stored = localStorage.getItem('gameCredentials')
+    if (stored) {
+      try {
+        const { username, password } = JSON.parse(stored)
+        this.inputUsername = username
+        this.inputPassword = password
+        this.handleSubmit()
+      } catch (err) {
+        console.error('Error loading stored credentials:', err)
+        localStorage.removeItem('gameCredentials')
+      }
     }
   }
 }
@@ -847,10 +1078,90 @@ h1 {
   color: #00ff00;
 }
 
-/* Add styles for disabled state */
-.disabled {
-  opacity: 0.5;
+.game-content {
+  transition: filter 0.3s ease;
+}
+
+.game-content.blurred {
+  filter: blur(8px);
   pointer-events: none;
+  user-select: none;
+}
+
+/* Login styles */
+.login-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  backdrop-filter: blur(8px);
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.login-box {
+  background: #1e1e1e;
+  padding: 2rem;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 400px;
+  text-align: center;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+h2 {
+  color: #00ff00;
+  margin-bottom: 2rem;
+}
+
+input {
+  background: #2a2a2a;
+  border: 1px solid #00ff00;
+  color: #00ff00;
+  padding: 0.5rem;
+  font-family: 'Ubuntu Mono', monospace;
+  font-size: 1.1rem;
+  border-radius: 4px;
+}
+
+button {
+  background: #00ff00;
+  color: #000;
+  border: none;
+  padding: 0.5rem;
+  font-family: 'Ubuntu Mono', monospace;
+  font-size: 1.1rem;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+button:hover {
+  background: #00cc00;
+}
+
+button:disabled {
+  background: #666;
+  cursor: not-allowed;
+}
+
+.error {
+  color: #ff4444;
+  font-size: 0.9rem;
+}
+
+.status {
+  color: #888;
+  font-size: 0.9rem;
 }
 </style>
+
 
