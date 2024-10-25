@@ -3,31 +3,16 @@
     <div class="login-box">
       <h2>🍪 Bash Cookie Clicker</h2>
       <div class="login-form">
-        <input 
-          type="text" 
-          v-model="inputUsername"
-          placeholder="Username (min. 3 characters)"
-          @keyup.enter="focusPassword"
-          ref="usernameInput"
-          :disabled="checking"
-        >
+        <input type="text" v-model="inputUsername" placeholder="Username (min. 3 characters)"
+          @keyup.enter="focusPassword" ref="usernameInput" :disabled="checking">
 
-        <input 
-          type="password" 
-          v-model="inputPassword"
-          placeholder="Password (4-20 characters)"
-          @keyup.enter="handleSubmit"
-          ref="passwordInput"
-          maxlength="20"
-        >
+        <input type="password" v-model="inputPassword" placeholder="Password (dont put a real one..)"
+          @keyup.enter="handleSubmit" ref="passwordInput" maxlength="20">
 
         <div class="status" v-if="checking">Checking...</div>
         <div class="error" v-if="error">{{ error }}</div>
 
-        <button 
-          @click="handleSubmit" 
-          :disabled="checking || !inputUsername.trim() || !isValidPassword"
-        >
+        <button @click="handleSubmit" :disabled="checking || !inputUsername.trim() || !isValidPassword">
           Start Playing
         </button>
       </div>
@@ -54,7 +39,15 @@ export default {
     }
   },
   created() {
-    this.supabase = createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey)
+    this.supabase = createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      auth: {
+        persistSession: false
+      }
+    })
   },
   computed: {
     isValidPassword() {
@@ -99,23 +92,39 @@ export default {
 
         let player
         if (existingPlayer) {
-          console.log('Found existing player:', existingPlayer)
           // Login
           if (existingPlayer.password !== this.inputPassword) {
             throw new Error('Invalid password')
           }
 
-          // Update only last_updated, not last_activity
+          console.log('Attempting to update player:', existingPlayer)
+
+          // First set the user context via RPC
+          await this.supabase.rpc('set_user_context', {
+            p_username: this.inputUsername.trim(),
+            p_user_id: existingPlayer.user_id
+          })
+
+          // Only update last_activity if it's been more than 5 minutes since last activity
+          const lastActivity = new Date(existingPlayer.last_activity)
+          const now = new Date()
+          const timeDiff = (now - lastActivity) / 1000 / 60 // difference in minutes
+
+          const updates = {
+            last_updated: now.toISOString()
+          }
+
+          // Only update last_activity if more than 5 minutes have passed
+          if (timeDiff > 5) {
+            updates.last_activity = now.toISOString()
+          }
+
           const { data: updatedPlayer, error: updateError } = await this.supabase
             .from('players')
-            .update({
-              last_updated: new Date().toISOString()
-            })
-            .eq('username', this.inputUsername.trim())
+            .update(updates)
+            .eq('id', existingPlayer.id)
             .select()
             .single()
-
-          console.log('Update result:', { updatedPlayer, updateError })
 
           if (updateError) {
             console.error('Update error:', updateError)
@@ -134,7 +143,8 @@ export default {
               cookies: 0,
               cookies_per_second: 0,
               last_updated: now,
-              last_activity: now
+              last_activity: now,
+              upgrades: null  // Add this to match schema
             }])
             .select()
             .single()
@@ -181,7 +191,7 @@ export default {
   },
   async mounted() {
     this.$refs.usernameInput.focus()
-    
+
     // Check for stored credentials
     const stored = localStorage.getItem('gameCredentials')
     if (stored) {

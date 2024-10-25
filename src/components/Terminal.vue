@@ -1,25 +1,32 @@
 <template>
-  <div class="terminal">
+  <div class="terminal" @click="focusInput" :class="{ 'terminal-expanded': isExpanded }">
+    <div class="terminal-header">
+      <div class="cookie-counter">
+        🍪 {{ formatNumber(cookies) }}
+      </div>
+      <button class="expand-button" @click.stop="toggleExpand">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+          <path v-if="!isExpanded" d="M3 3h4V1H1v6h2V3zm10 0v4h2V1h-6v2h4zm-10 10H3V9H1v6h6v-2H3zm10 0h-4v2h6V9h-2v4z"/>
+          <path v-else d="M1 3h2v4h4V1H1v2zm12 0v4h2V1h-6v6h4zM3 13v-4H1v6h6v-2H3zm10 0h-4v2h6V9h-2v4z"/>
+        </svg>
+      </button>
+      <button v-if="isExpanded" class="exit-button" @click.stop="exitFullscreen">
+        ✕
+      </button>
+    </div>
     <div class="terminal-history" ref="history">
       <div v-for="(entry, index) in commandHistory" :key="index">
         <div class="command-line">
-          <span class="prompt">brian@cookie.bchwy.com:~$</span>
+          <span class="prompt">{{ username }}@cookie.bchwy.com:~$</span>
           {{ entry.command }}
         </div>
         <div class="output" v-html="formatOutput(entry.output)"></div>
       </div>
     </div>
     <div class="command-input">
-      <span class="prompt">brian@cookie.bchwy.com:~$</span>
-      <input 
-        type="text" 
-        v-model="currentCommand"
-        @keyup.enter="submitCommand"
-        @keyup.up="previousCommand"
-        @keyup.down="nextCommand"
-        autofocus
-        ref="commandInput"
-      >
+      <span class="prompt">{{ username }}@cookie.bchwy.com:~$</span>
+      <input type="text" v-model="currentCommand" @keyup.enter="submitCommand" @keyup.up="previousCommand"
+        @keyup.down="nextCommand" autofocus ref="commandInput" class="command-input-field">
     </div>
   </div>
 </template>
@@ -31,13 +38,33 @@ export default {
     commandHistory: {
       type: Array,
       required: true
+    },
+    username: {
+      type: String,
+      default: 'guest'
+    },
+    // Add new prop for cookies
+    cookies: {
+      type: Number,
+      default: 0
     }
   },
   data() {
     return {
       currentCommand: '',
       commandBuffer: [],
-      commandIndex: -1
+      commandIndex: -1,
+      isExpanded: false
+    }
+  },
+  watch: {
+    commandHistory: {
+      handler() {
+        this.$nextTick(() => {
+          this.scrollToBottom()
+        })
+      },
+      deep: true
     }
   },
   methods: {
@@ -47,9 +74,6 @@ export default {
         this.commandIndex = this.commandBuffer.length
         this.$emit('command', this.currentCommand.trim())
         this.currentCommand = ''
-        this.$nextTick(() => {
-          this.$refs.history.scrollTop = this.$refs.history.scrollHeight
-        })
       }
     },
     previousCommand() {
@@ -69,10 +93,41 @@ export default {
     },
     formatOutput(output) {
       return output.replace(/\n/g, '<br>')
+    },
+    focusInput() {
+      this.$refs.commandInput.focus()
+    },
+    scrollToBottom() {
+      if (this.$refs.history) {
+        this.$refs.history.scrollTop = this.$refs.history.scrollHeight
+      }
+    },
+    
+    toggleExpand(event) {
+      event.preventDefault()
+      this.isExpanded = !this.isExpanded
+      // Ensure input stays focused after expanding
+      this.$nextTick(() => {
+        this.focusInput()
+      })
+    },
+    
+    formatNumber(num) {
+      if (num >= 1e9) return `${(num / 1e9).toFixed(1)}B`
+      if (num >= 1e6) return `${(num / 1e6).toFixed(1)}M`
+      if (num >= 1e3) return `${(num / 1e3).toFixed(1)}K`
+      return num.toFixed(1)
+    },
+    
+    exitFullscreen() {
+      this.isExpanded = false
+      this.$nextTick(() => {
+        this.focusInput()
+      })
     }
   },
   mounted() {
-    this.$refs.commandInput.focus()
+    this.focusInput()
   }
 }
 </script>
@@ -81,23 +136,124 @@ export default {
 .terminal {
   background-color: #1e1e1e;
   color: #00ff00;
-  padding: 20px;
+  padding: 15px;
   border-radius: 5px;
   height: 400px;
   overflow-y: auto;
   font-family: 'Ubuntu Mono', monospace;
+  cursor: text;
+  position: relative;
+  transition: all 0.3s ease;
 }
 
+.terminal-expanded {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 100vh;
+  width: 100vw;
+  z-index: 1000;
+  border-radius: 0;
+}
+
+.terminal-header {
+  position: fixed; /* Change from absolute to fixed when in fullscreen */
+  top: 15px;
+  right: 15px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 1001; /* Increase z-index to be above the terminal */
+  background-color: rgba(30, 30, 30, 0.8);
+  padding: 8px;
+  border-radius: 8px;
+  backdrop-filter: blur(4px); /* Add subtle blur effect */
+}
+
+/* Add specific styles for non-expanded state */
+.terminal:not(.terminal-expanded) .terminal-header {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+
+.cookie-counter {
+  background-color: rgba(0, 0, 0, 0.5);
+  padding: 5px 10px;
+  border-radius: 15px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 80px; /* Add minimum width to prevent jumping */
+  justify-content: center;
+}
+
+.expand-button, .exit-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  width: 32px;
+  height: 32px;
+}
+
+.expand-button {
+  color: #00ff00;
+  opacity: 0.7;
+}
+
+.expand-button:hover {
+  opacity: 1;
+  background-color: rgba(0, 255, 0, 0.1);
+}
+
+.exit-button {
+  color: #ff4444;
+  opacity: 0.7;
+  font-size: 18px;
+}
+
+.exit-button:hover {
+  opacity: 1;
+  background-color: rgba(255, 68, 68, 0.2);
+}
+
+/* Add padding to terminal in fullscreen to prevent content from going under header */
+.terminal-expanded {
+  padding-top: 60px;
+}
+
+.terminal-history {
+  max-height: calc(100% - 60px);
+  overflow-y: auto;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  padding-top: 10px;
+}
+
+/* Ensure the command input stays at the bottom when expanded */
 .command-input {
   display: flex;
-  margin-top: 10px;
-  align-items: center; /* This helps align the prompt and input */
+  position: sticky;
+  bottom: 0;
+  background-color: #1e1e1e;
+  padding: 10px 0;
+  align-items: baseline;
 }
 
 .prompt {
   color: #00ff00;
   margin-right: 8px;
   white-space: nowrap;
+  display: inline;
 }
 
 input {
@@ -106,15 +262,42 @@ input {
   color: #00ff00;
   font-family: 'Ubuntu Mono', monospace;
   font-size: 16px;
-  width: 100%;
+  flex: 1;
   outline: none;
   padding: 0;
   margin: 0;
   line-height: 1.2;
+  height: 20px;
+}
+
+.exit-button {
+  background: none;
+  border: none;
+  color: #ff4444;
+  cursor: pointer;
+  padding: 5px 8px;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+  border-radius: 4px;
+}
+
+.exit-button:hover {
+  opacity: 1;
+  background-color: rgba(255, 68, 68, 0.2);
 }
 
 .command-line {
-  margin-top: 10px;
+  margin-top: 5px;
+  display: flex;
+  align-items: baseline;
+}
+
+.command-line .prompt {
+  flex-shrink: 0;
 }
 
 .output {
@@ -131,5 +314,22 @@ input {
 
 .output {
   white-space: pre-wrap;
+}
+
+.command-input-field {
+  caret-color: #00ff00;
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+
+  from,
+  to {
+    caret-color: #00ff00;
+  }
+
+  50% {
+    caret-color: transparent;
+  }
 }
 </style>

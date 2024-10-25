@@ -5,13 +5,13 @@
         <h2>Welcome to Bash Cookie Clicker!</h2>
         <button class="close-button" @click="$emit('close')">×</button>
       </div>
-      
+
       <div class="intro-sections">
         <div class="section">
           <h3>Commands:</h3>
           <code>click</code> - Click cookie
           <code>shop</code> - View upgrades
-          <code>buy &lt;item&gt;</code> - Buy upgrade
+          <code>buy &lt;item&gt; [quantity]</code> - Buy upgrade(s). Quantity is optional (default: 1)
           <code>stats</code> - View stats
           <code>help</code> - Show all commands
         </div>

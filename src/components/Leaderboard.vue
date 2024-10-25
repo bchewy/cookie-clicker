@@ -6,14 +6,12 @@
       <span class="count">{{ activePlayers.length }}</span>
     </div>
     <div class="leaderboard-entries">
-      <div v-for="(player, index) in sortedLeaderboard" 
-           :key="player.username" 
-           class="entry"
-           :class="{ 'current-user': player.username === currentUser }">
+      <div v-for="(player, index) in sortedLeaderboard" :key="player.username" class="entry"
+        :class="{ 'current-user': player.username === currentUser }">
         <div class="rank-section">
           <span class="rank">{{ index + 1 }}</span>
-          <div class="status-dot" :class="{ 'online': isPlayerActive(player.username) }" 
-               :title="isPlayerActive(player.username) ? 'Online' : 'Offline'"></div>
+          <div class="status-dot" :class="{ 'online': isPlayerActive(player.username) }"
+            :title="isPlayerActive(player.username) ? 'Online' : 'Offline'"></div>
         </div>
         <div class="player-info">
           <span class="username">{{ player.username }}</span>

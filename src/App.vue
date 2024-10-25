@@ -5,7 +5,12 @@
       <h1>Bash Cookie Clicker</h1>
       <GameIntro v-if="showIntro" @close="showIntro = false" />
       <CookieDisplay :cookies="cookies" :cookiesPerSecond="cookiesPerSecond" />
-      <Terminal @command="handleCommand" :commandHistory="commandHistory" />
+      <Terminal 
+        @command="handleCommand" 
+        :commandHistory="commandHistory" 
+        :username="username"
+        :cookies="cookies"
+      />
       <Leaderboard :leaderboard="leaderboard" :activePlayers="activePlayers" :currentUser="username" />
     </template>
   </div>
@@ -56,6 +61,66 @@ const UPGRADES = {
     baseCost: 5000,
     cps: 300,
     description: 'Magical cookie conjuring'
+  },
+  'temple': {
+    name: 'Cookie Temple',
+    baseCost: 15000,
+    cps: 1000,
+    description: 'Sacred cookie shrine'
+  },
+  'timeMachine': {
+    name: 'Time Machine',
+    baseCost: 50000,
+    cps: 3500,
+    description: 'Cookies from other timelines'
+  },
+  'condenser': {
+    name: 'Antimatter Condenser',
+    baseCost: 150000,
+    cps: 12000,
+    description: 'Converts antimatter to cookies'
+  },
+  'prism': {
+    name: 'Prism',
+    baseCost: 500000,
+    cps: 40000,
+    description: 'Light becomes cookies'
+  },
+  'chancemaker': {
+    name: 'Chancemaker',
+    baseCost: 1500000,
+    cps: 130000,
+    description: 'Manipulates cookie probability'
+  },
+  'fractal': {
+    name: 'Fractal Engine',
+    baseCost: 5000000,
+    cps: 430000,
+    description: 'Recursive cookie generation'
+  },
+  'console': {
+    name: 'Console',
+    baseCost: 15000000,
+    cps: 1400000,
+    description: 'Hacks cookies into existence'
+  },
+  'idleverse': {
+    name: 'Idleverse',
+    baseCost: 50000000,
+    cps: 4700000,
+    description: 'Parallel cookie universes'
+  },
+  'ai': {
+    name: 'Cookie AI',
+    baseCost: 150000000,
+    cps: 15600000,
+    description: 'Artificial cookie intelligence'
+  },
+  'quantum': {
+    name: 'Quantum Baker',
+    baseCost: 500000000,
+    cps: 52000000,
+    description: 'Quantum cookie uncertainty'
   }
 }
 
@@ -174,8 +239,8 @@ export default {
           .update({
             cookies: this.cookies,
             cookies_per_second: this.cookiesPerSecond,
-            last_updated: new Date().toISOString(),
-            upgrades: this.upgrades  // Add this line to save upgrades state
+            upgrades: this.upgrades,
+            last_updated: new Date().toISOString()
           })
           .eq('username', this.username)
 
@@ -260,7 +325,7 @@ export default {
       }
     },
 
-    // Update handleLogin method
+    // Update handleLogin method to properly load upgrades from database
     async handleLogin(loginData) {
       try {
         this.username = loginData.username
@@ -269,61 +334,70 @@ export default {
         // Get the player's last state from database
         const { data: playerData, error } = await this.supabase
           .from('players')
-          .select('cookies, cookies_per_second, last_activity, upgrades')  // Changed to last_activity
+          .select('cookies, cookies_per_second, last_activity, upgrades')
           .eq('username', loginData.username)
           .single()
 
         if (error) throw error
 
-        // Store the original last activity time before any updates
-        const lastActivity = new Date(playerData.last_activity)
-        const now = new Date()
-        const secondsOffline = Math.max(0, Math.floor((now - lastActivity) / 1000))
-
-        console.log('Last activity:', lastActivity)
-        console.log('Current time:', now)
-        console.log('Seconds offline:', secondsOffline)
-        console.log('CPS:', playerData.cookies_per_second)
-
-        // Load saved upgrades and set initial state
+        // Initialize upgrades with base data and counts
         if (playerData.upgrades) {
-          this.upgrades = {
-            ...UPGRADES,
-            ...playerData.upgrades
-          }
-        } else {
+          // Merge the base UPGRADES data with saved counts
           this.upgrades = Object.keys(UPGRADES).reduce((acc, key) => {
-            acc[key] = { ...UPGRADES[key], count: 0 }
+            acc[key] = {
+              ...UPGRADES[key],
+              count: (playerData.upgrades[key]?.count || 0)
+            }
+            return acc
+          }, {})
+        } else {
+          // Initialize with zero counts if no saved data
+          this.upgrades = Object.keys(UPGRADES).reduce((acc, key) => {
+            acc[key] = {
+              ...UPGRADES[key],
+              count: 0
+            }
             return acc
           }, {})
         }
 
+        // Use last_activity for offline earnings calculation
+        const lastActivity = new Date(playerData.last_activity)
+        const now = new Date()
+        const minutesOffline = (now - lastActivity) / 1000 / 60
+
+        console.log('Last activity:', lastActivity)
+        console.log('Current time:', now)
+        console.log('Minutes offline:', minutesOffline)
+        console.log('CPS:', playerData.cookies_per_second)
+
         // Set initial CPS
         this.cookiesPerSecond = playerData.cookies_per_second || 0
 
-        // Calculate and apply offline earnings if enough time has passed
-        if (secondsOffline > 5) {
-          const offlineEarnings = this.cookiesPerSecond * secondsOffline
+        // Calculate and apply offline earnings if more than 5 minutes have passed
+        if (minutesOffline > 5) {
+          const offlineEarnings = Math.floor(this.cookiesPerSecond * minutesOffline * 60 * 0.5) // 50% efficiency
           console.log('Calculated offline earnings:', offlineEarnings)
 
           if (offlineEarnings > 0) {
             this.cookies = playerData.cookies + offlineEarnings
             this.commandHistory.push({
               command: 'offline-earnings',
-              output: `Welcome back! While you were away for ${this.formatTime(secondsOffline)}, your cookies generated ${this.formatNumber(offlineEarnings)} cookies! 🍪\nCurrent cookies: ${this.formatNumber(this.cookies)}`
+              output: `Welcome back! While you were away for ${this.formatTime(minutesOffline * 60)}, your cookies generated ${this.formatNumber(offlineEarnings)} cookies! 🍪\nCurrent cookies: ${this.formatNumber(this.cookies)}`
             })
           }
         } else {
           this.cookies = playerData.cookies
         }
 
-        // Update the database with new values and last_updated, but NOT last_activity
+        // Always update both timestamps on login
         await this.supabase
           .from('players')
           .update({
             cookies: this.cookies,
             cookies_per_second: this.cookiesPerSecond,
             last_updated: now.toISOString(),
+            last_activity: now.toISOString(),  // Update activity time on login
             upgrades: this.upgrades
           })
           .eq('username', this.username)
@@ -473,7 +547,8 @@ export default {
       this.syncWithServer()
     },
 
-    handleBuy(item) {
+    // Update handleBuy method to preserve user's upgrade data
+    async handleBuy(item) {
       if (!item) {
         this.commandHistory.push({
           command: 'buy',
@@ -494,14 +569,40 @@ export default {
       const cost = this.calculateCost(item)
       if (this.cookies >= cost) {
         this.cookies -= cost
-        upgrade.count++
+
+        // Update the upgrade count while preserving existing data
+        this.upgrades[item] = {
+          ...this.upgrades[item],  // Preserve existing upgrade data
+          count: (this.upgrades[item].count || 0) + 1
+        }
+
         this.recalculateCPS()
-        this.commandHistory.push({
-          command: 'buy ' + item,
-          output: `Bought ${upgrade.name}! You now have ${upgrade.count} of them.`
-        })
-        // Sync with server immediately after buying
-        this.syncWithServer()
+
+        // Immediately sync with server after purchase
+        try {
+          const { error } = await this.supabase
+            .from('players')
+            .update({
+              cookies: this.cookies,
+              cookies_per_second: this.cookiesPerSecond,
+              upgrades: this.upgrades,
+              last_updated: new Date().toISOString()
+            })
+            .eq('username', this.username)
+
+          if (error) throw error
+
+          this.commandHistory.push({
+            command: 'buy ' + item,
+            output: `Bought ${upgrade.name}! You now have ${this.upgrades[item].count} of them.`
+          })
+        } catch (err) {
+          console.error('Error syncing purchase:', err)
+          this.commandHistory.push({
+            command: 'buy ' + item,
+            output: 'Error saving purchase. Please try again.'
+          })
+        }
       } else {
         this.commandHistory.push({
           command: 'buy ' + item,
@@ -538,13 +639,53 @@ Available commands:
     },
 
     showShop() {
+      // Define column widths
+      const cols = {
+        item: 15,        // Width for item name
+        cost: 11,        // Width for cost
+        cps: 8,         // Width for CPS
+        desc: 40        // Width for description (increased since we removed owned column)
+      }
+
+      // Create header and separator
+      const header = [
+        'ITEM'.padEnd(cols.item),
+        'COST'.padStart(cols.cost),
+        'CPS'.padStart(cols.cps),
+        'DESCRIPTION'.padEnd(cols.desc)
+      ].join(' | ')
+
+      const separator = [
+        '-'.repeat(cols.item),
+        '-'.repeat(cols.cost),
+        '-'.repeat(cols.cps),
+        '-'.repeat(cols.desc)
+      ].join('-|-')
+
+      // Format each upgrade entry
       const shop = Object.entries(this.upgrades)
         .map(([key, upgrade]) => {
           const cost = this.calculateCost(key)
-          return `${key}: ${upgrade.description} (Cost: ${cost.toFixed(1)} cookies, CPS: ${upgrade.cps}, Owned: ${upgrade.count})`
+          // Truncate item name and description if too long
+          const itemName = key.padEnd(cols.item).slice(0, cols.item)
+          const description = upgrade.description.padEnd(cols.desc).slice(0, cols.desc)
+
+          return [
+            itemName,
+            this.formatNumber(cost).padStart(cols.cost),
+            this.formatNumber(upgrade.cps).padStart(cols.cps),
+            description
+          ].join(' | ')
         })
         .join('\n')
-      this.commandHistory.push({ command: 'ls', output: shop })
+
+      // Combine everything
+      const output = `${header}\n${separator}\n${shop}`
+
+      this.commandHistory.push({
+        command: 'ls',
+        output: `Available Upgrades:\n\n${output}`
+      })
     },
 
     saveGame() {
@@ -615,85 +756,53 @@ Available commands:
 
     // Update the handleVisibilityChange method
     async handleVisibilityChange() {
+      if (!this.username) return
+
       if (document.hidden) {
-        console.log('Tab hidden - cleaning up')
-        // Store the timestamp when tab becomes hidden
+        // Tab is hidden, store the timestamp and sync
         this.lastHiddenTime = new Date()
-
-        // Update last_activity when hiding
-        if (this.username && this.supabase) {
-          try {
-            const now = new Date().toISOString()
-            await this.supabase
-              .from('players')
-              .update({
-                last_activity: now,
-                last_updated: now
-              })
-              .eq('username', this.username)
-            console.log('Updated last_activity on hide:', now)
-          } catch (err) {
-            console.error('Error updating last_activity on hide:', err)
-          }
-        }
-
-        await this.cleanup()
+        await this.syncWithServer()
       } else {
-        console.log('Tab visible - reinitializing')
-        if (this.username && this.lastHiddenTime) {
-          try {
-            // Get the latest player data to ensure accurate offline calculation
-            const { data: playerData, error } = await this.supabase
-              .from('players')
-              .select('cookies, cookies_per_second, last_activity')
-              .eq('username', this.username)
-              .single()
+        // Tab is visible again
+        if (!this.lastHiddenTime) return
 
-            if (error) throw error
+        const now = new Date()
+        const minutesHidden = (now - this.lastHiddenTime) / 1000 / 60
 
+        // Only process if more than 5 minutes have passed
+        if (minutesHidden > 5) {
+          // First get the latest state
+          const { data: playerData, error } = await this.supabase
+            .from('players')
+            .select('cookies, cookies_per_second, last_activity')
+            .eq('username', this.username)
+            .single()
+
+          if (!error && playerData) {
             const lastActivity = new Date(playerData.last_activity)
-            const now = new Date()
-            const secondsOffline = Math.floor((now - lastActivity) / 1000)
+            const minutesOffline = (now - lastActivity) / 1000 / 60
 
-            console.log('Last activity:', lastActivity)
-            console.log('Current time:', now)
-            console.log('Seconds offline:', secondsOffline)
-
-            // Only process if offline for more than 5 seconds
-            if (secondsOffline > 5) {
-              const offlineEarnings = this.cookiesPerSecond * secondsOffline
-
+            if (minutesOffline > 5) {
+              const offlineEarnings = Math.floor(playerData.cookies_per_second * minutesOffline * 60 * 0.5)
               if (offlineEarnings > 0) {
-                // Update cookies with offline earnings
-                this.cookies += offlineEarnings
-
-                // Show welcome back message
-                this.commandHistory.push({
-                  command: 'offline-earnings',
-                  output: `Welcome back! While you were away for ${this.formatTime(secondsOffline)}, your cookies generated ${this.formatNumber(offlineEarnings)} cookies! 🍪`
-                })
-
-                // Update the database with new values
-                await this.supabase
-                  .from('players')
-                  .update({
-                    cookies: this.cookies,
-                    last_updated: now.toISOString()
-                  })
-                  .eq('username', this.username)
+                this.cookies = playerData.cookies + offlineEarnings
+                this.showMessage(`Welcome back! You earned ${this.formatNumber(offlineEarnings)} cookies while away.`)
               }
+
+              // Update both timestamps
+              await this.supabase
+                .from('players')
+                .update({
+                  cookies: this.cookies,
+                  last_updated: now.toISOString(),
+                  last_activity: now.toISOString()
+                })
+                .eq('username', this.username)
             }
-
-            // Reset last hidden time
-            this.lastHiddenTime = null
-
-            // Reinitialize everything
-            this.initializeRealtimeSubscription()
-            this.startAutoSync()
-          } catch (err) {
-            console.error('Error handling visibility change:', err)
           }
         }
+
+        this.lastHiddenTime = null
       }
     },
 
@@ -716,9 +825,10 @@ Available commands:
     },
 
     formatNumber(num) {
+      if (num >= 1e9) return `${(num / 1e9).toFixed(1)}B`
       if (num >= 1e6) return `${(num / 1e6).toFixed(1)}M`
       if (num >= 1e3) return `${(num / 1e3).toFixed(1)}K`
-      return Math.floor(num).toLocaleString()
+      return num.toFixed(1)
     }
   }
 }
@@ -743,3 +853,4 @@ h1 {
   pointer-events: none;
 }
 </style>
+
