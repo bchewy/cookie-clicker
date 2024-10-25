@@ -36,6 +36,9 @@
 </template>
 
 <script>
+import { SUPABASE_CONFIG } from '../config'
+import { createClient } from '@supabase/supabase-js'
+
 export default {
   name: 'Login',
   props: {
@@ -46,8 +49,13 @@ export default {
       inputUsername: '',
       inputPassword: '',
       error: '',
-      checking: false
+      checking: false,
+      supabase: null
     }
+  },
+  created() {
+    // Initialize Supabase client
+    this.supabase = createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey)
   },
   computed: {
     isValidPassword() {
@@ -73,22 +81,42 @@ export default {
       this.error = ''
 
       try {
-        const response = await fetch('http://localhost:3000/login-or-register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            username: this.inputUsername.trim(),
-            password: this.inputPassword
-          })
-        })
+        // Try to get existing player
+        const { data: existingPlayer, error: fetchError } = await this.supabase
+          .from('players')
+          .select()
+          .eq('username', this.inputUsername.trim())
+          .single()
 
-        const data = await response.json()
-
-        if (!response.ok) {
-          throw new Error(data.error || 'Authentication failed')
+        if (fetchError && fetchError.code !== 'PGRST116') {
+          throw fetchError
         }
 
-        // Store credentials in localStorage for auto-login
+        let player
+        if (existingPlayer) {
+          // Login
+          if (existingPlayer.password !== this.inputPassword) {
+            throw new Error('Invalid password')
+          }
+          player = existingPlayer
+        } else {
+          // Register new player
+          const { data: newPlayer, error: insertError } = await this.supabase
+            .from('players')
+            .insert([{
+              username: this.inputUsername.trim(),
+              password: this.inputPassword,
+              cookies: 0,
+              cookies_per_second: 0
+            }])
+            .select()
+            .single()
+
+          if (insertError) throw insertError
+          player = newPlayer
+        }
+
+        // Store credentials
         localStorage.setItem('gameCredentials', JSON.stringify({
           username: this.inputUsername.trim(),
           password: this.inputPassword
@@ -96,26 +124,31 @@ export default {
 
         this.$emit('login', {
           username: this.inputUsername.trim(),
-          password: this.inputPassword  // Add password to the emit
+          password: this.inputPassword
         })
       } catch (err) {
         console.error('Error:', err)
-        this.error = err.message
+        this.error = err.message || 'Error processing request'
       } finally {
         this.checking = false
       }
     }
   },
-  mounted() {
+  async mounted() {
     this.$refs.usernameInput.focus()
     
     // Check for stored credentials
     const stored = localStorage.getItem('gameCredentials')
     if (stored) {
-      const { username, password } = JSON.parse(stored)
-      this.inputUsername = username
-      this.inputPassword = password
-      this.handleSubmit()
+      try {
+        const { username, password } = JSON.parse(stored)
+        this.inputUsername = username
+        this.inputPassword = password
+        await this.handleSubmit()
+      } catch (err) {
+        console.error('Error loading stored credentials:', err)
+        localStorage.removeItem('gameCredentials')
+      }
     }
   }
 }

@@ -33,6 +33,8 @@ import CookieDisplay from './components/CookieDisplay.vue'
 import Leaderboard from './components/Leaderboard.vue'
 import Login from './components/Login.vue'
 import GameIntro from './components/GameIntro.vue'
+import { createClient } from '@supabase/supabase-js'
+import { SUPABASE_CONFIG } from './config'
 
 const UPGRADES = {
   'auto-clicker': {
@@ -92,27 +94,94 @@ export default {
       achievements: new Set(),
       multiplier: 1,
       username: '',
-      password: '', // Add this line
+      password: '',
       leaderboard: [],
-      ws: null,
-      activePlayers: [],
-      showIntro: true // Add this line
+      supabase: null,
+      subscription: null,
+      showIntro: true
     }
   },
   created() {
-    // Only initialize leaderboard updates
-    setInterval(() => {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.syncWithServer()
-      }
-    }, 1000)
+    // Initialize Supabase client
+    this.supabase = createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey)
+    
+    // Set up realtime subscription for leaderboard updates
+    this.subscription = this.supabase
+      .channel('public:players')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'players'
+        },
+        () => {
+          // Update leaderboard when any change occurs
+          this.fetchLeaderboard()
+        }
+      )
+      .subscribe()
+
+    // Start auto-sync if user is logged in
+    if (this.username) {
+      this.startAutoSync()
+    }
   },
   methods: {
+    async initializeSupabase() {
+      this.supabase = createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey)
+      
+      // Subscribe to realtime updates
+      this.subscription = this.supabase
+        .channel('public:players')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'players'
+          },
+          (payload) => {
+            console.log('Realtime update:', payload)
+            this.fetchLeaderboard()
+          }
+        )
+        .subscribe()
+
+      // Initial leaderboard fetch
+      await this.fetchLeaderboard()
+    },
+
+    async fetchLeaderboard() {
+      try {
+        const { data: activePlayers } = await this.supabase
+          .from('active_players')
+          .select('username')
+          .eq('is_online', true)
+
+        this.activePlayers = activePlayers?.map(p => p.username) || []
+
+        const { data: leaderboard } = await this.supabase
+          .from('players')
+          .select('username, cookies, cookies_per_second')
+          .order('cookies', { ascending: false })
+          .limit(10)
+
+        this.leaderboard = leaderboard?.map(player => ({
+          ...player,
+          cookiesPerSecond: player.cookies_per_second
+        })) || []
+      } catch (err) {
+        console.error('Error fetching leaderboard:', err)
+      }
+    },
+
     handleLogin(loginData) {
       this.username = loginData.username
-      this.password = loginData.password  // Store the password
-      this.connectWebSocket()
+      this.password = loginData.password
+      this.initializeSupabase()
       this.initializeGame()
+      this.startAutoSync()
     },
 
     initializeGame() {
@@ -319,64 +388,38 @@ Available commands:
       })
     },
 
-    connectWebSocket() {
-      this.ws = new WebSocket('ws://localhost:3000')
-      
-      this.ws.onopen = () => {
-        this.ws.send(JSON.stringify({
-          type: 'register',
-          username: this.username,
-          password: this.password
-        }))
-      }
-      
-      this.ws.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data)
-          
-          switch(message.type) {
-            case 'init':
-              if (message.player) {
-                this.cookies = message.player.cookies || 0
-                this.cookiesPerSecond = message.player.cookiesPerSecond || 0
-                this.recalculateCPS()
-              }
-              break
-              
-            case 'leaderboard':
-              this.leaderboard = message.data || []
-              this.activePlayers = message.activePlayers || []
-              console.log('Active players updated:', this.activePlayers) // Add logging
-              break
-
-            case 'error':
-              console.error('WebSocket error:', message.error)
-              break
-          }
-        } catch (err) {
-          console.error('Error parsing WebSocket message:', err)
-        }
-      }
-      
-      this.ws.onclose = () => {
-        console.log('WebSocket connection closed, attempting to reconnect...')
-        setTimeout(() => this.connectWebSocket(), 5000)
-      }
-
-      this.ws.onerror = (error) => {
-        console.error('WebSocket error:', error)
-      }
+    startAutoSync() {
+      // Sync every 5 seconds
+      setInterval(() => {
+        this.syncWithServer()
+      }, 5000)
     },
-    
-    syncWithServer() {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({
-          type: 'update',
-          username: this.username,
-          password: this.password,  // Include password in updates
-          cookies: this.cookies,
-          cookiesPerSecond: this.cookiesPerSecond
-        }))
+
+    async syncWithServer() {
+      if (!this.username) return
+
+      try {
+        const { error } = await this.supabase
+          .from('players')
+          .update({
+            cookies: this.cookies,
+            cookies_per_second: this.cookiesPerSecond,
+            last_updated: new Date().toISOString()
+          })
+          .eq('username', this.username)
+
+        if (error) throw error
+
+        // Update online status
+        await this.supabase
+          .from('active_players')
+          .upsert({
+            username: this.username,
+            is_online: true,
+            last_seen: new Date().toISOString()
+          })
+      } catch (err) {
+        console.error('Error syncing with server:', err)
       }
     },
 
@@ -385,31 +428,21 @@ Available commands:
       return input.replace(/[<>{}()\/\\]/g, '');
     },
 
-    startPolling() {
-      setInterval(async () => {
-        try {
-          // Update player data
-          const response = await fetch(`${API_URL}/update`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              username: this.username,
-              password: this.password,
-              cookies: this.cookies,
-              cookiesPerSecond: this.cookiesPerSecond
-            })
-          });
-
-          // Get leaderboard
-          const leaderboardResponse = await fetch(`${API_URL}/leaderboard`);
-          const leaderboardData = await leaderboardResponse.json();
-          this.leaderboard = leaderboardData;
-        } catch (err) {
-          console.error('Polling error:', err);
-        }
-      }, 5000); // Poll every 5 seconds
+    beforeUnmount() {
+      // Clean up subscription
+      if (this.subscription) {
+        this.subscription.unsubscribe()
+      }
+      
+      // Set player offline
+      if (this.username && this.supabase) {
+        this.supabase
+          .from('active_players')
+          .update({ is_online: false })
+          .eq('username', this.username)
+          .then(() => console.log('Set player offline'))
+          .catch(err => console.error('Error setting player offline:', err))
+      }
     }
   }
 }
@@ -434,4 +467,3 @@ h1 {
   pointer-events: none;
 }
 </style>
-
