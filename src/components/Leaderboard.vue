@@ -6,7 +6,7 @@
       <span class="count">{{ activePlayers.length }}</span>
     </div>
     <div class="leaderboard-entries">
-      <div v-for="(player, index) in sortedLeaderboard" :key="player.username" class="entry"
+      <div v-for="(player, index) in displayedLeaderboard" :key="player.username" class="entry"
         :class="{ 'current-user': player.username === currentUser }">
         <div class="rank-section">
           <span class="rank">{{ index + 1 }}</span>
@@ -22,6 +22,13 @@
         </div>
       </div>
     </div>
+    <button 
+      v-if="sortedLeaderboard.length > displayLimit" 
+      @click="toggleShowMore" 
+      class="show-more-btn"
+    >
+      {{ showingAll ? 'Show Less' : `Show More (${sortedLeaderboard.length - displayLimit} more)` }}
+    </button>
   </div>
 </template>
 
@@ -44,9 +51,20 @@ export default {
       default: ''
     }
   },
+  data() {
+    return {
+      displayLimit: 10,
+      showingAll: false
+    }
+  },
   computed: {
     sortedLeaderboard() {
       return [...this.leaderboard].sort((a, b) => b.cookies - a.cookies)
+    },
+    displayedLeaderboard() {
+      return this.showingAll 
+        ? this.sortedLeaderboard 
+        : this.sortedLeaderboard.slice(0, this.displayLimit)
     }
   },
   methods: {
@@ -60,6 +78,9 @@ export default {
       if (num >= 1e6) return (num / 1e6).toFixed(1) + 'M'
       if (num >= 1e3) return (num / 1e3).toFixed(1) + 'K'
       return Math.floor(num).toLocaleString()
+    },
+    toggleShowMore() {
+      this.showingAll = !this.showingAll
     }
   }
 }
@@ -169,5 +190,22 @@ h2 {
 .cps {
   color: #888;
   font-size: 0.9em;
+}
+
+.show-more-btn {
+  width: 100%;
+  padding: 0.5rem;
+  margin-top: 1rem;
+  background: #2a2a2a;
+  border: 1px solid #333;
+  color: #00ff00;
+  cursor: pointer;
+  border-radius: 4px;
+  font-family: 'Ubuntu Mono', monospace;
+  transition: background-color 0.2s;
+}
+
+.show-more-btn:hover {
+  background: #333;
 }
 </style>

@@ -277,11 +277,23 @@ export default {
       if (!this.username) return
 
       try {
+        // Fetch current CPS from the database
+        const { data: playerData, error: fetchError } = await this.supabase
+          .from('players')
+          .select('cookies_per_second')
+          .eq('username', this.username)
+          .single()
+
+        if (fetchError) throw fetchError
+
+        // Add the new CPS to the existing CPS
+        const updatedCPS = playerData.cookies_per_second + this.cookiesPerSecond
+
         const { error } = await this.supabase
           .from('players')
           .update({
             cookies: this.cookies,
-            cookies_per_second: this.cookiesPerSecond,
+            cookies_per_second: updatedCPS, // Update with the new total CPS
             upgrades: this.upgrades,
             last_updated: new Date().toISOString()
           })
@@ -453,7 +465,7 @@ export default {
         // Start leaderboard polling
         this.leaderboardInterval = setInterval(() => {
           this.fetchLeaderboard()
-        }, 5000)
+        }, 10000) // Changed from 5000 to 10000 ms
 
       } catch (err) {
         console.error('Error in handleLogin:', err)
@@ -494,7 +506,7 @@ export default {
           .from('players')
           .select('username, cookies, cookies_per_second')
           .order('cookies', { ascending: false })
-          .limit(10)
+          .limit(100) // Increased limit but still reasonable
 
         if (error) throw error
 
@@ -681,7 +693,7 @@ export default {
           .from('players')
           .update({
             cookies: this.cookies,
-            cookies_per_second: this.cookiesPerSecond,
+            cookies_per_second: this.cookiesPerSecond, // Ensure this is correct
             upgrades: this.upgrades,
             last_updated: new Date().toISOString()
           })
@@ -709,8 +721,9 @@ export default {
     },
 
     recalculateCPS() {
-      this.cookiesPerSecond = Object.values(this.upgrades)
+      const newCPS = Object.values(this.upgrades)
         .reduce((total, upgrade) => total + (upgrade.cps * upgrade.count), 0)
+      this.cookiesPerSecond += newCPS // Add new CPS to existing CPS
       // Sync with server after CPS changes
       this.syncWithServer()
     },
@@ -1163,5 +1176,12 @@ button:disabled {
   font-size: 0.9rem;
 }
 </style>
+
+
+
+
+
+
+
 
 

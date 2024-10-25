@@ -173,6 +173,17 @@ export default {
           password: this.inputPassword
         }))
 
+        // Update app state
+        this.username = player.username
+        this.password = this.inputPassword
+        this.cookies = player.cookies || 0
+        this.cookiesPerSecond = player.cookies_per_second || 0
+
+        // Initialize game after successful login
+        this.initializeGame()
+        this.startAutoSync()
+        this.initializeRealtimeSubscription()
+
         // Emit login event
         this.$emit('login', {
           username: player.username,
