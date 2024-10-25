@@ -1,13 +1,14 @@
 bash-cookie-clicker/
 ├── client/
+│   ├── dist/
+│   ├── public/
+│   ├── src/
+│   │   ├── components/
+│   │   ├── App.vue
+│   │   └── main.js
 │   ├── index.html
-│   ├── vite.config.js
-│   └── src/
-│       ├── App.vue
-│       ├── components/
-│       │   ├── Terminal.vue
-│       │   └── CookieDisplay.vue
-│       └── main.js
-├── server/
+│   └── vite.config.js
+├── api/
 │   └── index.js
-└── package.json
+├── package.json
+└── vercel.json
