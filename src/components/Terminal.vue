@@ -3,14 +3,14 @@
     <div class="terminal-history" ref="history">
       <div v-for="(entry, index) in commandHistory" :key="index">
         <div class="command-line">
-          <span class="prompt">user@cookie.bchwy.com:~$</span>
+          <span class="prompt">brian@cookie.bchwy.com:~$</span>
           {{ entry.command }}
         </div>
         <div class="output" v-html="formatOutput(entry.output)"></div>
       </div>
     </div>
     <div class="command-input">
-      <span class="prompt">user@cookie.bchwy.com:~$</span>
+      <span class="prompt">brian@cookie.bchwy.com:~$</span>
       <input 
         type="text" 
         v-model="currentCommand"

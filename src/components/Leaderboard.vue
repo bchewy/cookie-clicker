@@ -19,7 +19,7 @@
           <span class="username">{{ player.username }}</span>
           <div class="stats">
             <span class="cookies">🍪 {{ formatNumber(player.cookies) }}</span>
-            <span class="cps">({{ formatNumber(player.cookiesPerSecond) }}/s)</span>
+            <span class="cps">({{ formatNumber(player.cookies_per_second) }}/s)</span>
           </div>
         </div>
       </div>

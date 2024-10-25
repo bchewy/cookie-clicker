@@ -68,6 +68,7 @@ export default {
 
     async handleSubmit() {
       if (!this.inputUsername.trim() || !this.isValidPassword) {
+        this.error = 'Please enter valid username and password'
         return
       }
 
@@ -80,26 +81,51 @@ export default {
       this.error = ''
 
       try {
-        // Modified query to use proper Supabase filtering
+        console.log('Attempting login for:', this.inputUsername.trim())
+
+        // First, check if user exists
         const { data: existingPlayer, error: fetchError } = await this.supabase
           .from('players')
-          .select('username, password, cookies, cookies_per_second')
+          .select('*')  // Select all fields for debugging
           .eq('username', this.inputUsername.trim())
-          .maybeSingle() // Use maybeSingle() instead of single()
+          .single()
 
-        if (fetchError) {
+        console.log('Fetch result:', { existingPlayer, fetchError })
+
+        if (fetchError && fetchError.code !== 'PGRST116') {
+          console.error('Fetch error:', fetchError)
           throw fetchError
         }
 
         let player
         if (existingPlayer) {
+          console.log('Found existing player:', existingPlayer)
           // Login
           if (existingPlayer.password !== this.inputPassword) {
             throw new Error('Invalid password')
           }
-          player = existingPlayer
+
+          // Update only last_updated, not last_activity
+          const { data: updatedPlayer, error: updateError } = await this.supabase
+            .from('players')
+            .update({
+              last_updated: new Date().toISOString()
+            })
+            .eq('username', this.inputUsername.trim())
+            .select()
+            .single()
+
+          console.log('Update result:', { updatedPlayer, updateError })
+
+          if (updateError) {
+            console.error('Update error:', updateError)
+            throw updateError
+          }
+          player = updatedPlayer
         } else {
-          // Register new player
+          console.log('Creating new player')
+          // For new players, set both timestamps
+          const now = new Date().toISOString()
           const { data: newPlayer, error: insertError } = await this.supabase
             .from('players')
             .insert([{
@@ -107,13 +133,17 @@ export default {
               password: this.inputPassword,
               cookies: 0,
               cookies_per_second: 0,
-              last_updated: new Date().toISOString()
+              last_updated: now,
+              last_activity: now
             }])
             .select()
             .single()
 
+          console.log('Insert result:', { newPlayer, insertError })
+
           if (insertError) {
-            if (insertError.code === '23505') { // Unique violation
+            console.error('Insert error:', insertError)
+            if (insertError.code === '23505') {
               throw new Error('Username already taken')
             }
             throw insertError
@@ -121,13 +151,19 @@ export default {
           player = newPlayer
         }
 
-        // Store credentials in localStorage
+        if (!player) {
+          throw new Error('Failed to get player data')
+        }
+
+        console.log('Final player data:', player)
+
+        // Store credentials
         localStorage.setItem('gameCredentials', JSON.stringify({
           username: this.inputUsername.trim(),
           password: this.inputPassword
         }))
 
-        // Emit login event with player data
+        // Emit login event
         this.$emit('login', {
           username: player.username,
           password: this.inputPassword,

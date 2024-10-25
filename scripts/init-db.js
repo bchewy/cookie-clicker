@@ -14,7 +14,9 @@ async function initializeDatabase() {
           password TEXT NOT NULL,
           cookies FLOAT DEFAULT 0,
           cookies_per_second FLOAT DEFAULT 0,
-          last_updated TIMESTAMPTZ DEFAULT NOW()
+          last_updated TIMESTAMPTZ DEFAULT NOW(),
+          last_activity TIMESTAMPTZ DEFAULT NOW(),  -- New column for offline earnings
+          upgrades JSONB DEFAULT NULL
         );
       `
     });

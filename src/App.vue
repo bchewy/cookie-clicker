@@ -1,29 +1,12 @@
 <template>
   <div class="container">
-    <Login 
-      v-if="!username" 
-      :username="username" 
-      @login="handleLogin"
-    />
+    <Login v-if="!username" :username="username" @login="handleLogin" />
     <template v-else>
       <h1>Bash Cookie Clicker</h1>
-      <GameIntro 
-        v-if="showIntro" 
-        @close="showIntro = false"
-      />
-      <CookieDisplay 
-        :cookies="cookies" 
-        :cookiesPerSecond="cookiesPerSecond"
-      />
-      <Terminal 
-        @command="handleCommand"
-        :commandHistory="commandHistory"
-      />
-      <Leaderboard 
-        :leaderboard="leaderboard" 
-        :activePlayers="activePlayers"
-        :currentUser="username"
-      />
+      <GameIntro v-if="showIntro" @close="showIntro = false" />
+      <CookieDisplay :cookies="cookies" :cookiesPerSecond="cookiesPerSecond" />
+      <Terminal @command="handleCommand" :commandHistory="commandHistory" />
+      <Leaderboard :leaderboard="leaderboard" :activePlayers="activePlayers" :currentUser="username" />
     </template>
   </div>
 </template>
@@ -102,16 +85,21 @@ export default {
       showIntro: true,
       activePlayers: [],
       leaderboardInterval: null,
+      lastKnownCookies: 0,
+      lastHiddenTime: null,
+      isClosing: false,
     }
   },
   created() {
     // Initialize Supabase client
     this.supabase = createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey)
-    
-    // We'll modify the subscription setup
-    if (this.username) {
-      this.initializeRealtimeSubscription()
-    }
+
+    // Add window unload listeners
+    window.addEventListener('beforeunload', this.handleBeforeUnload)
+    window.addEventListener('unload', this.handleBeforeUnload)
+
+    // Add visibility change listener
+    document.addEventListener('visibilitychange', this.handleVisibilityChange)
   },
   methods: {
     initializeRealtimeSubscription() {
@@ -126,18 +114,33 @@ export default {
             table: 'players'
           },
           (payload) => {
-            // Only update leaderboard on changes
             this.fetchLeaderboard()
           }
         )
         .subscribe()
 
-      // Set up presence channel for active players
+      // Use a single shared presence channel for all users
       this.presenceChannel = this.supabase
         .channel('online-users')
         .on('presence', { event: 'sync' }, () => {
-          const state = this.presenceChannel.presenceState()
-          this.activePlayers = Object.values(state).flat().map(p => p.username)
+          const presenceState = this.presenceChannel.presenceState()
+          // Get all online users from the shared channel
+          const onlineUsers = new Set()
+          Object.values(presenceState).forEach(presences => {
+            presences.forEach(presence => {
+              if (presence.username) {
+                onlineUsers.add(presence.username)
+              }
+            })
+          })
+          this.activePlayers = Array.from(onlineUsers)
+          console.log('Active players:', this.activePlayers)
+        })
+        .on('presence', { event: 'join' }, ({ key, newPresences }) => {
+          console.log('User joined:', newPresences)
+        })
+        .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
+          console.log('User left:', leftPresences)
         })
         .subscribe(async (status) => {
           if (status === 'SUBSCRIBED') {
@@ -156,7 +159,7 @@ export default {
         this.cookies += this.cookiesPerSecond
       }, 1000)
 
-      // Sync with server less frequently (every 10 seconds)
+      // Sync with server every 10 seconds
       this.syncInterval = setInterval(() => {
         this.syncWithServer()
       }, 10000)
@@ -171,57 +174,182 @@ export default {
           .update({
             cookies: this.cookies,
             cookies_per_second: this.cookiesPerSecond,
-            last_updated: new Date().toISOString()
+            last_updated: new Date().toISOString(),
+            upgrades: this.upgrades  // Add this line to save upgrades state
           })
           .eq('username', this.username)
 
         if (error) throw error
+
+        await this.fetchLeaderboard()
       } catch (err) {
         console.error('Error syncing with server:', err)
       }
     },
 
     // Add cleanup method
-    cleanup() {
-      // Clear intervals
-      if (this.cookieInterval) clearInterval(this.cookieInterval)
-      if (this.syncInterval) clearInterval(this.syncInterval)
+    async cleanup(isUnloading = false) {
+      if (this.isClosing) return
+      this.isClosing = true
 
-      // Clean up subscriptions
-      if (this.subscription) {
-        this.subscription.unsubscribe()
-      }
-      if (this.presenceChannel) {
-        this.presenceChannel.unsubscribe()
-      }
+      try {
+        if (this.username && this.supabase) {
+          const now = new Date().toISOString()
 
-      // Final sync before cleanup
-      this.syncWithServer()
+          // Only update game state, not last_activity
+          const { error } = await this.supabase
+            .from('players')
+            .update({
+              cookies: this.cookies,
+              cookies_per_second: this.cookiesPerSecond,
+              last_updated: now,
+              upgrades: this.upgrades
+            })
+            .eq('username', this.username)
 
-      if (this.leaderboardInterval) {
-        clearInterval(this.leaderboardInterval)
+          if (error) throw error
+          console.log('Cleanup: Updated game state at:', now)
+        }
+
+        // Clear intervals
+        if (this.cookieInterval) clearInterval(this.cookieInterval)
+        if (this.syncInterval) clearInterval(this.syncInterval)
+        if (this.leaderboardInterval) clearInterval(this.leaderboardInterval)
+
+        // Clean up presence and subscription
+        if (this.presenceChannel) {
+          await this.presenceChannel.untrack()
+          await this.presenceChannel.unsubscribe()
+        }
+        if (this.subscription) {
+          await this.subscription.unsubscribe()
+        }
+
+      } catch (err) {
+        console.error('Error during cleanup:', err)
+      } finally {
+        this.isClosing = false
       }
     },
 
-    // Update handleLogin to initialize realtime after login
-    handleLogin(loginData) {
-      this.username = loginData.username
-      this.password = loginData.password
-      this.cookies = loginData.cookies || 0
-      this.cookiesPerSecond = loginData.cookiesPerSecond || 0
-      this.initializeRealtimeSubscription()
-      this.initializeGame()
-      this.startAutoSync()
-      
-      // Start leaderboard polling
-      this.leaderboardInterval = setInterval(() => {
-        this.fetchLeaderboard()
-      }, 5000) // Update every 5 seconds
+    // Add a new method specifically for handling beforeunload
+    handleBeforeUnload(event) {
+      // Cancel the event as stated by the standard
+      event.preventDefault()
+      event.returnValue = ''
+
+      if (this.username && this.supabase) {
+        const now = new Date().toISOString()
+
+        const data = {
+          cookies: this.cookies,
+          cookies_per_second: this.cookiesPerSecond,
+          last_updated: now,
+          last_activity: now,  // Update last_activity when closing
+          upgrades: this.upgrades
+        }
+
+        // Create the endpoint URL with proper headers
+        const endpoint = `${SUPABASE_CONFIG.url}/rest/v1/players?username=eq.${encodeURIComponent(this.username)}`
+
+        // Send the beacon with proper headers
+        const blob = new Blob([JSON.stringify(data)], { type: 'application/json' })
+        const success = navigator.sendBeacon(endpoint, blob)
+
+        console.log('Updating last_activity time to:', now)
+      }
+    },
+
+    // Update handleLogin method
+    async handleLogin(loginData) {
+      try {
+        this.username = loginData.username
+        this.password = loginData.password
+
+        // Get the player's last state from database
+        const { data: playerData, error } = await this.supabase
+          .from('players')
+          .select('cookies, cookies_per_second, last_activity, upgrades')  // Changed to last_activity
+          .eq('username', loginData.username)
+          .single()
+
+        if (error) throw error
+
+        // Store the original last activity time before any updates
+        const lastActivity = new Date(playerData.last_activity)
+        const now = new Date()
+        const secondsOffline = Math.max(0, Math.floor((now - lastActivity) / 1000))
+
+        console.log('Last activity:', lastActivity)
+        console.log('Current time:', now)
+        console.log('Seconds offline:', secondsOffline)
+        console.log('CPS:', playerData.cookies_per_second)
+
+        // Load saved upgrades and set initial state
+        if (playerData.upgrades) {
+          this.upgrades = {
+            ...UPGRADES,
+            ...playerData.upgrades
+          }
+        } else {
+          this.upgrades = Object.keys(UPGRADES).reduce((acc, key) => {
+            acc[key] = { ...UPGRADES[key], count: 0 }
+            return acc
+          }, {})
+        }
+
+        // Set initial CPS
+        this.cookiesPerSecond = playerData.cookies_per_second || 0
+
+        // Calculate and apply offline earnings if enough time has passed
+        if (secondsOffline > 5) {
+          const offlineEarnings = this.cookiesPerSecond * secondsOffline
+          console.log('Calculated offline earnings:', offlineEarnings)
+
+          if (offlineEarnings > 0) {
+            this.cookies = playerData.cookies + offlineEarnings
+            this.commandHistory.push({
+              command: 'offline-earnings',
+              output: `Welcome back! While you were away for ${this.formatTime(secondsOffline)}, your cookies generated ${this.formatNumber(offlineEarnings)} cookies! 🍪\nCurrent cookies: ${this.formatNumber(this.cookies)}`
+            })
+          }
+        } else {
+          this.cookies = playerData.cookies
+        }
+
+        // Update the database with new values and last_updated, but NOT last_activity
+        await this.supabase
+          .from('players')
+          .update({
+            cookies: this.cookies,
+            cookies_per_second: this.cookiesPerSecond,
+            last_updated: now.toISOString(),
+            upgrades: this.upgrades
+          })
+          .eq('username', this.username)
+
+        // Initialize game systems
+        this.initializeRealtimeSubscription()
+        this.initializeGame()
+        this.startAutoSync()
+
+        // Start leaderboard polling
+        this.leaderboardInterval = setInterval(() => {
+          this.fetchLeaderboard()
+        }, 5000)
+
+      } catch (err) {
+        console.error('Error in handleLogin:', err)
+        this.commandHistory.push({
+          command: 'login-error',
+          output: 'Error logging in. Please try again.'
+        })
+      }
     },
 
     async initializeSupabase() {
       this.supabase = createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey)
-      
+
       // Subscribe to realtime updates
       this.subscription = this.supabase
         .channel('public:players')
@@ -267,10 +395,10 @@ export default {
           count: 0
         }
       }
-      
+
       // Start the auto-cookie generation
       setInterval(this.generateCookies, 1000)
-      
+
       // Load saved game if exists
       this.loadGame()
     },
@@ -279,9 +407,9 @@ export default {
       // Sanitize command input
       const sanitizedCommand = this.sanitizeInput(command);
       if (sanitizedCommand !== command) {
-        this.commandHistory.push({ 
-          command, 
-          output: 'Invalid command: Special characters not allowed' 
+        this.commandHistory.push({
+          command,
+          output: 'Invalid command: Special characters not allowed'
         });
         return;
       }
@@ -289,23 +417,23 @@ export default {
       const args = command.split(' ')
       const cmd = args[0]
 
-      switch(cmd) {
+      switch (cmd) {
         case 'click-cookie':
         case 'click':
           const clickReward = this.clickPower * this.multiplier
           this.cookies += clickReward
-          this.commandHistory.push({ 
-            command, 
-            output: `Cookie clicked! +${clickReward.toFixed(1)} 🍪` 
+          this.commandHistory.push({
+            command,
+            output: `Cookie clicked! +${clickReward.toFixed(1)} 🍪`
           })
           this.checkAchievements()
           break
 
         case 'cookie-count':
         case 'stats':
-          this.commandHistory.push({ 
-            command, 
-            output: `You have ${this.cookies.toFixed(1)} cookies\nCookies per second: ${this.cookiesPerSecond.toFixed(1)}\nClick power: ${this.clickPower}` 
+          this.commandHistory.push({
+            command,
+            output: `You have ${this.cookies.toFixed(1)} cookies\nCookies per second: ${this.cookiesPerSecond.toFixed(1)}\nClick power: ${this.clickPower}`
           })
           break
 
@@ -347,18 +475,18 @@ export default {
 
     handleBuy(item) {
       if (!item) {
-        this.commandHistory.push({ 
-          command: 'buy', 
-          output: 'Usage: buy <item-name>' 
+        this.commandHistory.push({
+          command: 'buy',
+          output: 'Usage: buy <item-name>'
         })
         return
       }
 
       const upgrade = this.upgrades[item]
       if (!upgrade) {
-        this.commandHistory.push({ 
-          command: 'buy ' + item, 
-          output: 'Item not found: ' + item 
+        this.commandHistory.push({
+          command: 'buy ' + item,
+          output: 'Item not found: ' + item
         })
         return
       }
@@ -368,14 +496,16 @@ export default {
         this.cookies -= cost
         upgrade.count++
         this.recalculateCPS()
-        this.commandHistory.push({ 
-          command: 'buy ' + item, 
-          output: `Bought ${upgrade.name}! You now have ${upgrade.count} of them.` 
+        this.commandHistory.push({
+          command: 'buy ' + item,
+          output: `Bought ${upgrade.name}! You now have ${upgrade.count} of them.`
         })
+        // Sync with server immediately after buying
+        this.syncWithServer()
       } else {
-        this.commandHistory.push({ 
-          command: 'buy ' + item, 
-          output: `Not enough cookies! Need ${cost.toFixed(1)} cookies.` 
+        this.commandHistory.push({
+          command: 'buy ' + item,
+          output: `Not enough cookies! Need ${cost.toFixed(1)} cookies.`
         })
       }
     },
@@ -388,6 +518,8 @@ export default {
     recalculateCPS() {
       this.cookiesPerSecond = Object.values(this.upgrades)
         .reduce((total, upgrade) => total + (upgrade.cps * upgrade.count), 0)
+      // Sync with server after CPS changes
+      this.syncWithServer()
     },
 
     showHelp() {
@@ -442,7 +574,7 @@ Available commands:
     checkAchievements() {
       const milestones = [100, 1000, 10000, 100000, 1000000]
       const currentMilestone = milestones.find(m => this.cookies >= m && !this.achievements.has(`cookies-${m}`))
-      
+
       if (currentMilestone) {
         this.achievements.add(`cookies-${currentMilestone}`)
         this.multiplier += 0.1
@@ -454,7 +586,7 @@ Available commands:
     },
 
     showAchievements() {
-      const output = this.achievements.size > 0 
+      const output = this.achievements.size > 0
         ? Array.from(this.achievements).join('\n')
         : 'No achievements yet. Keep clicking!'
       this.commandHistory.push({
@@ -470,12 +602,123 @@ Available commands:
 
     beforeUnmount() {
       this.cleanup()
+      window.removeEventListener('beforeunload', this.handleBeforeUnload)
+      window.removeEventListener('unload', this.handleBeforeUnload)
+      document.removeEventListener('visibilitychange', this.handleVisibilityChange)
     },
 
     // Add beforeRouteLeave navigation guard if using vue-router
     beforeRouteLeave(to, from, next) {
       this.cleanup()
       next()
+    },
+
+    // Update the handleVisibilityChange method
+    async handleVisibilityChange() {
+      if (document.hidden) {
+        console.log('Tab hidden - cleaning up')
+        // Store the timestamp when tab becomes hidden
+        this.lastHiddenTime = new Date()
+
+        // Update last_activity when hiding
+        if (this.username && this.supabase) {
+          try {
+            const now = new Date().toISOString()
+            await this.supabase
+              .from('players')
+              .update({
+                last_activity: now,
+                last_updated: now
+              })
+              .eq('username', this.username)
+            console.log('Updated last_activity on hide:', now)
+          } catch (err) {
+            console.error('Error updating last_activity on hide:', err)
+          }
+        }
+
+        await this.cleanup()
+      } else {
+        console.log('Tab visible - reinitializing')
+        if (this.username && this.lastHiddenTime) {
+          try {
+            // Get the latest player data to ensure accurate offline calculation
+            const { data: playerData, error } = await this.supabase
+              .from('players')
+              .select('cookies, cookies_per_second, last_activity')
+              .eq('username', this.username)
+              .single()
+
+            if (error) throw error
+
+            const lastActivity = new Date(playerData.last_activity)
+            const now = new Date()
+            const secondsOffline = Math.floor((now - lastActivity) / 1000)
+
+            console.log('Last activity:', lastActivity)
+            console.log('Current time:', now)
+            console.log('Seconds offline:', secondsOffline)
+
+            // Only process if offline for more than 5 seconds
+            if (secondsOffline > 5) {
+              const offlineEarnings = this.cookiesPerSecond * secondsOffline
+
+              if (offlineEarnings > 0) {
+                // Update cookies with offline earnings
+                this.cookies += offlineEarnings
+
+                // Show welcome back message
+                this.commandHistory.push({
+                  command: 'offline-earnings',
+                  output: `Welcome back! While you were away for ${this.formatTime(secondsOffline)}, your cookies generated ${this.formatNumber(offlineEarnings)} cookies! 🍪`
+                })
+
+                // Update the database with new values
+                await this.supabase
+                  .from('players')
+                  .update({
+                    cookies: this.cookies,
+                    last_updated: now.toISOString()
+                  })
+                  .eq('username', this.username)
+              }
+            }
+
+            // Reset last hidden time
+            this.lastHiddenTime = null
+
+            // Reinitialize everything
+            this.initializeRealtimeSubscription()
+            this.startAutoSync()
+          } catch (err) {
+            console.error('Error handling visibility change:', err)
+          }
+        }
+      }
+    },
+
+    // Add this method
+    formatOfflineEarnings(amount) {
+      if (amount >= 1e6) return `${(amount / 1e6).toFixed(1)}M`
+      if (amount >= 1e3) return `${(amount / 1e3).toFixed(1)}K`
+      return Math.floor(amount).toLocaleString()
+    },
+
+    // Add these helper methods
+    formatTime(seconds) {
+      if (seconds < 60) return `${seconds} seconds`
+      if (seconds < 3600) {
+        const minutes = Math.floor(seconds / 60)
+        return `${minutes} minute${minutes !== 1 ? 's' : ''}`
+      }
+      const hours = Math.floor(seconds / 3600)
+      return `${hours} hour${hours !== 1 ? 's' : ''}`
+    },
+
+    formatNumber(num) {
+      if (num >= 1e6) return `${(num / 1e6).toFixed(1)}M`
+      if (num >= 1e3) return `${(num / 1e3).toFixed(1)}K`
+      return Math.floor(num).toLocaleString()
     }
   }
 }
@@ -500,4 +743,3 @@ h1 {
   pointer-events: none;
 }
 </style>
-
