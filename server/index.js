@@ -2,7 +2,9 @@ const express = require('express');
 const cors = require('cors');
 const WebSocket = require('ws');
 const http = require('http');
-const db = require('./db');
+const db = process.env.NODE_ENV === 'production' 
+  ? require('./db-supabase')
+  : require('./db');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const xss = require('xss-clean');

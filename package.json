@@ -18,7 +18,9 @@
     "sqlite3": "^5.1.7",
     "vue": "^3.3.4",
     "ws": "^8.16.0",
-    "xss-clean": "^0.1.4"
+    "xss-clean": "^0.1.4",
+    "@supabase/supabase-js": "^2.x.x",
+    "dotenv": "^16.x.x"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^4.2.3",
