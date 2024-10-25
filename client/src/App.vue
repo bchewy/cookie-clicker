@@ -383,6 +383,33 @@ Available commands:
     // Add input sanitization
     sanitizeInput(input) {
       return input.replace(/[<>{}()\/\\]/g, '');
+    },
+
+    startPolling() {
+      setInterval(async () => {
+        try {
+          // Update player data
+          const response = await fetch(`${API_URL}/update`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              username: this.username,
+              password: this.password,
+              cookies: this.cookies,
+              cookiesPerSecond: this.cookiesPerSecond
+            })
+          });
+
+          // Get leaderboard
+          const leaderboardResponse = await fetch(`${API_URL}/leaderboard`);
+          const leaderboardData = await leaderboardResponse.json();
+          this.leaderboard = leaderboardData;
+        } catch (err) {
+          console.error('Polling error:', err);
+        }
+      }, 5000); // Poll every 5 seconds
     }
   }
 }

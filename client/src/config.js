@@ -3,8 +3,6 @@ const VERCEL_URL = process.env.VERCEL_URL || 'your-vercel-domain.vercel.app';
 
 export const API_URL = isProd 
   ? `https://${VERCEL_URL}/api`
-  : 'http://localhost:3000/api';
+  : 'http://localhost:3000';
 
-export const WS_URL = isProd
-  ? `wss://${VERCEL_URL}/api`
-  : 'ws://localhost:3000';
+// Remove WebSocket URL since we can't use it on Vercel
