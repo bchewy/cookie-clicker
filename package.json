@@ -1,15 +1,18 @@
 {
-    "name": "bash-cookieclicker",
-    "version": "1.0.0",
-    "private": true,
-    "scripts": {
-        "build": "cd client && npm install && npm run build",
-        "start": "node api/index.js"
-    },
-    "dependencies": {
-        "@supabase/supabase-js": "^2.x.x",
-        "cors": "^2.8.5",
-        "express": "^4.18.2",
-        "dotenv": "^16.x.x"
-    }
+  "name": "bash-cookieclicker-client",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.6",
+    "vue": "^3.3.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^4.2.3",
+    "vite": "^4.4.9"
+  }
 }

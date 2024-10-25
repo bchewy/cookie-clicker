@@ -2,20 +2,24 @@ const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
 const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
+  process.env.VITE_SUPABASE_URL,
+  process.env.VITE_SUPABASE_ANON_KEY
 );
 
-async function initializeDatabase() {
+async function checkDatabase() {
   try {
-    // Create the players table
-    const { error } = await supabase.rpc('init_players_table');
-    
+    // Test connection by trying to select from players table
+    const { data, error } = await supabase
+      .from('players')
+      .select('id')
+      .limit(1);
+
     if (error) throw error;
-    console.log('Database initialized successfully');
+    console.log('Database connection successful');
   } catch (err) {
-    console.error('Error initializing database:', err);
+    console.error('Database check failed:', err);
+    console.log('Please run the SQL setup script in Supabase SQL Editor');
   }
 }
 
-initializeDatabase();
+checkDatabase();
